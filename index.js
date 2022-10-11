@@ -5,9 +5,11 @@ require('dotenv').config()
 const app = express()
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion } = require('mongodb');
+const nodemailer = require('nodemailer');
+const mg = require('nodemailer-mailgun-transport');
 
 
-
+// pass=kbgk$wPp!rZ78e$
 
 app.use(cors())
 app.use(express.json())
@@ -24,19 +26,83 @@ function varifyJWT(req, res, next) {
   // console.log('abc');
   const authHeader = req.headers.authorization;
   if (!authHeader) {
-      return res.status(401).send({ message: 'UnAuthorized access' })
+    return res.status(401).send({ message: 'UnAuthorized access' })
   }
   const token = authHeader.split(' ')[1];
 
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, function (err, decoded) {
-      if (err) {
-          return res.status(403).send({ message: 'Forbidden access' })
-      }
-      req.decoded = decoded;
-      next();
+    if (err) {
+      return res.status(403).send({ message: 'Forbidden access' })
+    }
+    req.decoded = decoded;
+    next();
   })
 }
+////////////////////////////////////////////////////////////////////////////////////
 
+
+const auth = {
+  auth: {
+    api_key: '347bcfa9187154a11d7f71ab1c84c009-b0ed5083-f0c56366',
+    domain: 'sandboxbbb95c3b3a6543d9889b9838745228b1.mailgun.org'
+  }
+}
+
+const nodemailerMailgun = nodemailer.createTransport(mg(auth));
+
+
+
+
+
+
+function sendAppoinmentEmail(booking) {
+  const { patient, patientName, treatment, date, slot } = booking;
+
+
+  var email = {
+    from: 'hawladerrahul8@gmail.com',
+    to: patient,
+    subject: `your appoinment for ${patient} is on ${date} at ${slot} is confirmed.`,
+    text: `your appoinment for${treatment} is on ${date} at ${slot} is confirmed. `,
+    html: `
+  <div>
+  <p>hello ${patientName},</p>
+  <h3>Your appoinment for ${treatment} is confirmed.</h3>
+  <p>Loking forward to seeing you on ${date} & ${slot}.</p>
+  <h3> Our address</h3>
+  <p>Munshigonj Sirajdikhan Icchapura Bazar</p>
+  <p>Bangladesh</p>
+  
+  
+  </div>
+  
+  
+  `
+
+  }
+
+  nodemailerMailgun.sendMail(email, (err, info) => {
+
+    if (err) {
+      console.log(err)
+
+    }
+    else {
+      console.log('email success', info);
+    }
+
+  })
+
+}
+
+
+
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////////////////
 
 async function run() {
 
@@ -46,6 +112,7 @@ async function run() {
     const bookingCollection = client.db('jerin-parlour').collection('booking');
     const userCollection = client.db('jerin-parlour').collection('users');
     const reviewCollection = client.db('jerin-parlour').collection('review');
+    const employeeCollection = client.db('jerin-parlour').collection('employees');
 
 
 
@@ -53,18 +120,18 @@ async function run() {
       const requester = req.decoded.email;
       const requesterAccount = await userCollection.findOne({ email: requester });
       if (requesterAccount.role === 'admin') {
-          next();
+        next();
       }
       else {
-          res.status(403).send({ message: 'forbidden' });
+        res.status(403).send({ message: 'forbidden' });
       }
-  }
+    }
 
 
 
     app.get('/service', async (req, res) => {
       const query = {};
-      const cursor = serviceCollection.find(query);
+      const cursor = serviceCollection.find(query).project({ name: 1 });
       const services = await cursor.toArray()
       res.send(services);
 
@@ -72,16 +139,16 @@ async function run() {
     //////////////////////////////////////////////////////////////////////////
     app.get('/booking', varifyJWT, async (req, res) => {
       const patient = req.query.patient;
-      
+
       const decodedEmail = req.decoded.email;
-            if (patient === decodedEmail) {
-                const query = { patient: patient };
-                const bookings = await bookingCollection.find(query).toArray();
-                return res.send(bookings);
-            }
-            else {
-                return res.status(403).send({ message: 'forbidden access' });
-            }
+      if (patient === decodedEmail) {
+        const query = { patient: patient };
+        const bookings = await bookingCollection.find(query).toArray();
+        return res.send(bookings);
+      }
+      else {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
 
 
     })
@@ -97,7 +164,10 @@ async function run() {
       }
       const result = await bookingCollection.insertOne(booking);
 
+      console.log('sending email');
 
+
+      sendAppoinmentEmail(booking)
 
       return res.send({ success: true, result })
     })
@@ -106,34 +176,34 @@ async function run() {
     app.get('/user', varifyJWT, async (req, res) => {
       const users = await userCollection.find().toArray();
       res.send(users)
-  })
+    })
 
-  app.get('/admin/:email', async (req, res) => {
-    const email = req.params.email;
-    const user = await userCollection.findOne({ email: email });
-    const isAdmin = user.role === 'admin';
-    res.send({ admin: isAdmin })
-})
-
-
+    app.get('/admin/:email', async (req, res) => {
+      const email = req.params.email;
+      const user = await userCollection.findOne({ email: email });
+      const isAdmin = user.role === 'admin';
+      res.send({ admin: isAdmin })
+    })
 
 
-  app.put('/user/admin/:email', varifyJWT, verifyAdmin, async (req, res) => {
-    const email = req.params.email;
 
 
-    const filter = { email: email };
+    app.put('/user/admin/:email', varifyJWT, verifyAdmin, async (req, res) => {
+      const email = req.params.email;
 
 
-    const updateDoc = {
+      const filter = { email: email };
+
+
+      const updateDoc = {
         $set: { role: 'admin' },
-    };
-    const result = await userCollection.updateOne(filter, updateDoc);
+      };
+      const result = await userCollection.updateOne(filter, updateDoc);
 
-    res.send(result)
-   
+      res.send(result)
 
-})
+
+    })
 
 
 
@@ -146,13 +216,13 @@ async function run() {
       const options = { upsert: true }
 
       const updateDoc = {
-          $set: user,
+        $set: user,
       };
       const result = await userCollection.updateOne(filter, updateDoc, options);
-      
-      const token = jwt.sign({ email: email }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' })
+
+      const token = jwt.sign({ email: email }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '24h' })
       res.send({ result, token })
-  })
+    })
 
     ///////////////////////////////////////////////////////////////////////////////
 
@@ -185,6 +255,30 @@ async function run() {
       res.send(result)
     })
 
+
+
+
+    ////////////////////////////////////////////////////////////////
+    app.get('/employee', varifyJWT, verifyAdmin, async (req, res) => {
+      const employees = await employeeCollection.find().toArray();
+      res.send(employees);
+    })
+
+
+
+    app.post('/employee', varifyJWT, verifyAdmin, async (req, res) => {
+      const employee = req.body;
+      const result = await employeeCollection.insertOne(employee);
+      res.send(result);
+    });
+
+
+    app.delete('/employee/:email', varifyJWT, verifyAdmin, async (req, res) => {
+      const email = req.params.email;
+      const filter = { email: email };
+      const result = await employeeCollection.deleteOne(filter);
+      res.send(result);
+    })
 
   }
   finally {
